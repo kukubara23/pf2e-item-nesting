@@ -1,0 +1,28 @@
+{
+  "id": "pf2e-item-nesting",
+  "title": "PF2e Item Nesting",
+  "description": "Visually nest items underneath other items on PF2e character sheets.",
+  "version": "0.0.1",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
+  "relationships": {
+    "systems": [
+      {
+        "id": "pf2e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "6.0.0"
+        }
+      }
+    ]
+  },
+  "esmodules": ["scripts/main.js"],
+  "authors": [
+    { "name": "Your Name" }
+  ],
+  "url": "https://github.com/YOUR-USERNAME/pf2e-item-nesting",
+  "manifest": "https://raw.githubusercontent.com/YOUR-USERNAME/pf2e-item-nesting/main/module.json",
+  "download": "https://github.com/YOUR-USERNAME/pf2e-item-nesting/archive/refs/heads/main.zip"
+}
