@@ -1,8 +1,8 @@
 {
   "id": "pf2e-item-nesting",
   "title": "PF2e Item Nesting",
-  "description": "Visually nest items underneath other items on PF2e character sheets.",
-  "version": "0.0.4",
+  "description": "Visually shows items underneath other items on PF2e character sheets.",
+  "version": "0.1.0",
   "compatibility": {
     "minimum": "13",
     "verified": "13"
