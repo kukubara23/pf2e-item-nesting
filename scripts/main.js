@@ -1,9 +1,10 @@
 const MODULE_ID = "pf2e-item-nesting";
+const FLAG_PARENT = "parentId";
 
 // Item types that can RECEIVE attachments (parents)
 const PARENT_TYPES = new Set(["weapon", "armor", "shield", "equipment"]);
 
-// Item types that CAN'T be attached (excluded as children)
+// Item types that CAN'T be children (don't usually get attached to things)
 const NON_ATTACHABLE_TYPES = new Set(["shield", "armor"]);
 
 Hooks.once("init", () => {
@@ -16,16 +17,16 @@ Hooks.once("ready", () => {
 
 /**
  * Add header buttons to physical item sheets.
- * - On parent-type items (weapon, armor, etc.): "Add Attachment"
- * - On any attached item: "Detach"
+ * - "Add Attachment" on parent-type items
+ * - "Detach" on items that are already attached to something
  */
-Hooks.on("getHeaderControlsItemSheetPF2e", addHeaderButtons);
+Hooks.on("getItemSheetPF2eHeaderButtons", addHeaderButtons);
 
 function addHeaderButtons(sheet, buttons) {
   const item = sheet.item;
-  if (!item?.actor) return; // Only show on items that belong to an actor
+  if (!item?.actor) return; // Only on actor-owned items
 
-  // "Add Attachment" button — shown on parent-type items
+  // "Add Attachment" — shown on parent-type items
   if (PARENT_TYPES.has(item.type)) {
     buttons.unshift({
       label: "Add Attachment",
@@ -35,9 +36,8 @@ function addHeaderButtons(sheet, buttons) {
     });
   }
 
-  // "Detach" button — shown on items that are currently attached to something
-  // PF2e stores the parent reference on the child as system.subitemOf
-  if (item.system?.subitemOf) {
+  // "Detach" — shown on items that have our flag set
+  if (item.getFlag(MODULE_ID, FLAG_PARENT)) {
     buttons.unshift({
       label: "Detach",
       class: "pf2e-item-nesting-detach",
@@ -48,21 +48,27 @@ function addHeaderButtons(sheet, buttons) {
 }
 
 /**
- * Open the attach dialog for a given parent item.
+ * Open the attach dialog. The parent is fixed (the sheet we're on);
+ * the user picks which child to attach.
  */
 async function openAttachDialog(parent) {
   const actor = parent.actor;
   if (!actor) return;
 
-  // Find candidate children: physical items on the same actor that aren't
-  // the parent itself, aren't already attached, and aren't excluded types
-  const candidates = actor.items.filter((i) => {
-    if (!i.isOfType?.("physical")) return false;
-    if (i.id === parent.id) return false;
-    if (NON_ATTACHABLE_TYPES.has(i.type)) return false;
-    if (i.system?.subitemOf) return false; // already attached to something
-    return true;
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  // Candidate children:
+  // - physical items on the same actor
+  // - not the parent itself
+  // - not types we exclude
+  // - not already attached (to anything, including this parent)
+  const candidates = actor.items
+    .filter((i) => {
+      if (!i.isOfType?.("physical")) return false;
+      if (i.id === parent.id) return false;
+      if (NON_ATTACHABLE_TYPES.has(i.type)) return false;
+      if (i.getFlag(MODULE_ID, FLAG_PARENT)) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   if (candidates.length === 0) {
     ui.notifications.warn("No attachable items available on this actor.");
@@ -98,7 +104,7 @@ async function openAttachDialog(parent) {
   if (!child) return;
 
   try {
-    await parent.attach(child);
+    await child.setFlag(MODULE_ID, FLAG_PARENT, parent.id);
     ui.notifications.info(`Attached "${child.name}" to "${parent.name}".`);
   } catch (err) {
     console.error(`${MODULE_ID} | attach error:`, err);
@@ -107,16 +113,11 @@ async function openAttachDialog(parent) {
 }
 
 /**
- * Detach an item from its parent.
+ * Remove the attachment flag from an item.
  */
 async function detachItem(item) {
   try {
-    if (typeof item.detach === "function") {
-      await item.detach();
-    } else {
-      // Fallback: clear the subitemOf reference directly
-      await item.update({ "system.subitemOf": null });
-    }
+    await item.unsetFlag(MODULE_ID, FLAG_PARENT);
     ui.notifications.info(`Detached "${item.name}".`);
   } catch (err) {
     console.error(`${MODULE_ID} | detach error:`, err);
