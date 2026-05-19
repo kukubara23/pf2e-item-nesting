@@ -20,9 +20,9 @@
   },
   "esmodules": ["scripts/main.js"],
   "authors": [
-    { "name": "Your Name" }
+    { "name": "Kukubara23" }
   ],
-  "url": "https://github.com/YOUR-USERNAME/pf2e-item-nesting",
-  "manifest": "https://raw.githubusercontent.com/YOUR-USERNAME/pf2e-item-nesting/main/module.json",
-  "download": "https://github.com/YOUR-USERNAME/pf2e-item-nesting/archive/refs/heads/main.zip"
+  "url": "https://github.com/kukubara23/pf2e-item-nesting",
+  "manifest": "https://raw.githubusercontent.com/kukubara23/pf2e-item-nesting/main/module.json",
+  "download": "https://github.com/kukubara23/pf2e-item-nesting/archive/refs/heads/main.zip"
 }
