@@ -1,5 +1,10 @@
 const MODULE_ID = "pf2e-item-nesting";
-const FLAG_PARENT = "parentId";
+
+// Item types that can RECEIVE attachments (parents)
+const PARENT_TYPES = new Set(["weapon", "armor", "shield", "equipment"]);
+
+// Item types that CAN'T be attached (excluded as children)
+const NON_ATTACHABLE_TYPES = new Set(["shield", "armor"]);
 
 Hooks.once("init", () => {
   console.log(`${MODULE_ID} | initialized`);
@@ -10,100 +15,111 @@ Hooks.once("ready", () => {
 });
 
 /**
- * Add "Attach to..." and "Detach" options to the right-click menu
- * on items in a PF2e character sheet's inventory.
+ * Add header buttons to physical item sheets.
+ * - On parent-type items (weapon, armor, etc.): "Add Attachment"
+ * - On any attached item: "Detach"
  */
-Hooks.on("getCharacterSheetPF2eItemContext", addContextMenuOptions);
-Hooks.on("getItemSheetPF2eContext", addContextMenuOptions);
+Hooks.on("getHeaderControlsItemSheetPF2e", addHeaderButtons);
 
-function addContextMenuOptions(sheet, menuItems) {
-  menuItems.push({
-    name: "Attach to...",
-    icon: '<i class="fa-solid fa-link"></i>',
-    condition: (li) => {
-      // Show this option for any item that isn't already attached
-      const item = getItemFromElement(sheet, li);
-      return item && !item.getFlag(MODULE_ID, FLAG_PARENT);
-    },
-    callback: (li) => {
-      const item = getItemFromElement(sheet, li);
-      if (item) openAttachDialog(item);
-    },
-  });
+function addHeaderButtons(sheet, buttons) {
+  const item = sheet.item;
+  if (!item?.actor) return; // Only show on items that belong to an actor
 
-  menuItems.push({
-    name: "Detach",
-    icon: '<i class="fa-solid fa-link-slash"></i>',
-    condition: (li) => {
-      // Only show this option if the item IS attached to something
-      const item = getItemFromElement(sheet, li);
-      return item && !!item.getFlag(MODULE_ID, FLAG_PARENT);
-    },
-    callback: async (li) => {
-      const item = getItemFromElement(sheet, li);
-      if (item) {
-        await item.unsetFlag(MODULE_ID, FLAG_PARENT);
-        ui.notifications.info(`Detached "${item.name}"`);
-      }
-    },
-  });
+  // "Add Attachment" button — shown on parent-type items
+  if (PARENT_TYPES.has(item.type)) {
+    buttons.unshift({
+      label: "Add Attachment",
+      class: "pf2e-item-nesting-attach",
+      icon: "fa-solid fa-link",
+      onclick: () => openAttachDialog(item),
+    });
+  }
+
+  // "Detach" button — shown on items that are currently attached to something
+  // PF2e stores the parent reference on the child as system.subitemOf
+  if (item.system?.subitemOf) {
+    buttons.unshift({
+      label: "Detach",
+      class: "pf2e-item-nesting-detach",
+      icon: "fa-solid fa-link-slash",
+      onclick: () => detachItem(item),
+    });
+  }
 }
 
 /**
- * Given an element from the sheet, find the actual Item document on the actor.
- * PF2e puts the item id in a data attribute on the list row.
+ * Open the attach dialog for a given parent item.
  */
-function getItemFromElement(sheet, element) {
-  const el = element instanceof jQuery ? element[0] : element;
-  const itemId = el?.dataset?.itemId ?? el?.closest("[data-item-id]")?.dataset?.itemId;
-  return sheet.actor?.items?.get(itemId) ?? null;
-}
-
-/**
- * Show a dialog letting the user pick another item on the same actor
- * to attach this item to.
- */
-async function openAttachDialog(item) {
-  const actor = item.actor;
+async function openAttachDialog(parent) {
+  const actor = parent.actor;
   if (!actor) return;
 
-  // Build a list of every other item on the actor, excluding the item itself
-  const candidates = actor.items
-    .filter((other) => other.id !== item.id)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Find candidate children: physical items on the same actor that aren't
+  // the parent itself, aren't already attached, and aren't excluded types
+  const candidates = actor.items.filter((i) => {
+    if (!i.isOfType?.("physical")) return false;
+    if (i.id === parent.id) return false;
+    if (NON_ATTACHABLE_TYPES.has(i.type)) return false;
+    if (i.system?.subitemOf) return false; // already attached to something
+    return true;
+  }).sort((a, b) => a.name.localeCompare(b.name));
 
   if (candidates.length === 0) {
-    ui.notifications.warn("No other items to attach to.");
+    ui.notifications.warn("No attachable items available on this actor.");
     return;
   }
 
-  const optionsHtml = candidates
+  const options = candidates
     .map((c) => `<option value="${c.id}">${c.name} (${c.type})</option>`)
     .join("");
 
   const content = `
     <form>
-      <p>Attach <strong>${item.name}</strong> to:</p>
+      <p>Attach an item to <strong>${parent.name}</strong>:</p>
       <div class="form-group">
-        <select name="parentId" style="width: 100%;">${optionsHtml}</select>
+        <select name="childId" style="width: 100%;">${options}</select>
       </div>
     </form>
   `;
 
-  // Use the V13 DialogV2 API
-  const parentId = await foundry.applications.api.DialogV2.prompt({
-    window: { title: "Attach Item" },
+  const childId = await foundry.applications.api.DialogV2.prompt({
+    window: { title: `Attach to ${parent.name}` },
     content,
     ok: {
       label: "Attach",
-      callback: (event, button) => button.form.elements.parentId.value,
+      callback: (event, button) => button.form.elements.childId.value,
     },
     rejectClose: false,
   });
 
-  if (!parentId) return;
+  if (!childId) return;
 
-  await item.setFlag(MODULE_ID, FLAG_PARENT, parentId);
-  const parent = actor.items.get(parentId);
-  ui.notifications.info(`Attached "${item.name}" to "${parent?.name ?? "?"}"`);
+  const child = actor.items.get(childId);
+  if (!child) return;
+
+  try {
+    await parent.attach(child);
+    ui.notifications.info(`Attached "${child.name}" to "${parent.name}".`);
+  } catch (err) {
+    console.error(`${MODULE_ID} | attach error:`, err);
+    ui.notifications.error(`Couldn't attach: ${err.message}`);
+  }
+}
+
+/**
+ * Detach an item from its parent.
+ */
+async function detachItem(item) {
+  try {
+    if (typeof item.detach === "function") {
+      await item.detach();
+    } else {
+      // Fallback: clear the subitemOf reference directly
+      await item.update({ "system.subitemOf": null });
+    }
+    ui.notifications.info(`Detached "${item.name}".`);
+  } catch (err) {
+    console.error(`${MODULE_ID} | detach error:`, err);
+    ui.notifications.error(`Couldn't detach: ${err.message}`);
+  }
 }
